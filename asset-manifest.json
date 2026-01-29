@@ -1,0 +1,15 @@
+{
+  "files": {
+    "main.css": "/compression-huffman-aes/static/css/main.da999b95.css",
+    "main.js": "/compression-huffman-aes/static/js/main.c8d11b20.js",
+    "static/js/453.cc607e55.chunk.js": "/compression-huffman-aes/static/js/453.cc607e55.chunk.js",
+    "index.html": "/compression-huffman-aes/index.html",
+    "main.da999b95.css.map": "/compression-huffman-aes/static/css/main.da999b95.css.map",
+    "main.c8d11b20.js.map": "/compression-huffman-aes/static/js/main.c8d11b20.js.map",
+    "453.cc607e55.chunk.js.map": "/compression-huffman-aes/static/js/453.cc607e55.chunk.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.da999b95.css",
+    "static/js/main.c8d11b20.js"
+  ]
+}
