@@ -40,6 +40,16 @@ const CompressionApp = () => {
     const freq = {};
     for (let c of texte) freq[c] = (freq[c] || 0) + 1;
     const noeuds = Object.entries(freq).map(([c, f]) => new Noeud(c, f));
+    
+    // Cas spécial: un seul symbole unique
+    if (noeuds.length === 1) {
+      const map = {};
+      map[noeuds[0].char] = '0';
+      setCodes(map);
+      setEtape(3);
+      return;
+    }
+    
     while (noeuds.length > 1) {
       noeuds.sort((a, b) => a.freq - b.freq);
       const g = noeuds.shift();
@@ -72,16 +82,13 @@ const CompressionApp = () => {
     const cleAleatoire = CryptoJS.lib.WordArray.random(32);
     const cleHex = cleAleatoire.toString(CryptoJS.enc.Hex);
     
-    // CORRECTION : Stocker la longueur originale du binaire
-    const longueurOriginale = compresse.length;
+    // NOUVELLE APPROCHE : Chiffrer directement la chaîne binaire comme du texte
+    // Cela évite les problèmes de conversion binaire<->hex
+    const iv = CryptoJS.lib.WordArray.random(16);
     
-    // Conversion du texte binaire compressé en hexadécimal
-    const compresseHex = binaryToHex(compresse);
-    
-    // Chiffrement AES-256 en mode CBC avec IV aléatoire
-    const iv = CryptoJS.lib.WordArray.random(16); // 128 bits IV
+    // Chiffrement AES-256 de la chaîne binaire directement
     const encrypted = CryptoJS.AES.encrypt(
-      CryptoJS.enc.Hex.parse(compresseHex),
+      compresse, // La chaîne binaire "010110..." directement
       cleAleatoire,
       {
         iv: iv,
@@ -90,11 +97,10 @@ const CompressionApp = () => {
       }
     );
     
-    // Stockage de la clé, IV, texte chiffré ET longueur originale
+    // Stockage de la clé, IV et texte chiffré
     const donneesChiffrees = {
       iv: iv.toString(CryptoJS.enc.Hex),
-      chiffre: encrypted.ciphertext.toString(CryptoJS.enc.Hex),
-      longueur: longueurOriginale  // CORRECTION : Ajout de la longueur
+      chiffre: encrypted.toString() // Format standard CryptoJS (Base64)
     };
     
     setCle(cleHex);
@@ -113,7 +119,7 @@ const CompressionApp = () => {
       
       // Déchiffrement AES
       const decrypted = CryptoJS.AES.decrypt(
-        { ciphertext: CryptoJS.enc.Hex.parse(donneesChiffrees.chiffre) },
+        donneesChiffrees.chiffre, // Format Base64 standard
         cleWord,
         {
           iv: ivWord,
@@ -122,18 +128,18 @@ const CompressionApp = () => {
         }
       );
       
-      // Conversion du résultat en binaire
-      const decryptedHex = decrypted.toString(CryptoJS.enc.Hex);
-      let dec = hexToBinary(decryptedHex);
+      // Conversion du résultat en chaîne (notre binaire)
+      const dec = decrypted.toString(CryptoJS.enc.Utf8);
       
-      // CORRECTION : Tronquer à la longueur originale
-      if (donneesChiffrees.longueur) {
-        dec = dec.substring(0, donneesChiffrees.longueur);
+      // Vérification que le déchiffrement a fonctionné
+      if (!dec || !/^[01]+$/.test(dec)) {
+        throw new Error('Déchiffrement invalide');
       }
       
       // Décodage Huffman
       const inv = {};
       for (let [c, code] of Object.entries(codes)) inv[code] = c;
+      
       let txt = '', curr = '';
       for (let b of dec) {
         curr += b;
@@ -143,35 +149,20 @@ const CompressionApp = () => {
         }
       }
       
+      // Vérification qu'il ne reste pas de bits non décodés
+      if (curr !== '') {
+        console.warn('Bits restants non décodés:', curr);
+      }
+      
       setRecupere(txt);
       calculer(txt);
       setEtape(6);
     } catch (error) {
       console.error('Erreur de déchiffrement:', error);
       setRecupere('');
+      calculer('');
       setEtape(6);
     }
-  };
-
-  // Fonctions de conversion binaire <-> hexadécimal CORRIGÉES
-  const binaryToHex = (binary) => {
-    let hex = '';
-    // Padding à un multiple de 4 pour la conversion
-    const paddedBinary = binary.padEnd(Math.ceil(binary.length / 4) * 4, '0');
-    
-    for (let i = 0; i < paddedBinary.length; i += 4) {
-      const chunk = paddedBinary.substring(i, i + 4);
-      hex += parseInt(chunk, 2).toString(16);
-    }
-    return hex;
-  };
-
-  const hexToBinary = (hex) => {
-    let binary = '';
-    for (let i = 0; i < hex.length; i++) {
-      binary += parseInt(hex[i], 16).toString(2).padStart(4, '0');
-    }
-    return binary;
   };
 
   const calculer = (txt) => {
@@ -198,6 +189,11 @@ const CompressionApp = () => {
   };
 
   const telecharger = () => {
+    if (!metriques || !metriques.ok) {
+      alert('Impossible de générer le rapport : la vérification a échoué');
+      return;
+    }
+    
     const donneesChiffrees = JSON.parse(chiffre);
     let r = `═══════════════════════════════════════════════════════════════
 RAPPORT : COMPRESSION ET CHIFFREMENT DE TEXTE
@@ -255,12 +251,12 @@ ${cle}
 IV (128 bits / 32 hex):
 ${donneesChiffrees.iv}
 
-Texte chiffré (hexadécimal):
+Texte chiffré (Base64):
 ${donneesChiffrees.chiffre.substring(0, 500)}${donneesChiffrees.chiffre.length > 500 ? '...' : ''}
 
 Mode: CBC (Cipher Block Chaining)
 Padding: PKCS7
-Longueur originale préservée: ${donneesChiffrees.longueur} bits
+Format: Base64 (standard CryptoJS)
 
 ═══════════════════════════════════════════════════════════════
 6. VÉRIFICATION
@@ -293,7 +289,7 @@ SÉCURITÉ
 ✅ Mode: CBC avec IV aléatoire unique
 ✅ Clé: 256 bits générée aléatoirement
 ✅ Résistance: Sécurité militaire et gouvernementale
-✅ Préservation de la longueur: Protection contre la troncature
+✅ Format: Base64 standard pour compatibilité maximale
 
 ═══════════════════════════════════════════════════════════════
 Fin du rapport
@@ -377,13 +373,13 @@ Fin du rapport
                 <button
                   onClick={analyser}
                   disabled={!texte}
-                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 font-bold"
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 font-bold transition"
                 >
                   Analyser →
                 </button>
                 <button
                   onClick={() => setTexte(exemple)}
-                  className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-semibold"
+                  className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-semibold transition"
                 >
                   Exemple
                 </button>
@@ -421,14 +417,14 @@ Fin du rapport
                   </thead>
                   <tbody>
                     {symboles.map((s, i) => (
-                      <tr key={i} className="border-b">
+                      <tr key={i} className="border-b hover:bg-gray-100">
                         <td className="p-2">{i + 1}</td>
                         <td className="p-2 font-mono font-bold">{s.symbole}</td>
                         <td className="p-2 text-right">{s.freq}</td>
                         <td className="p-2 text-right">{s.prob}%</td>
                         <td className="p-2">
                           <div className="bg-gray-200 h-4 rounded">
-                            <div className="bg-blue-500 h-4 rounded" style={{ width: `${s.prob}%` }}></div>
+                            <div className="bg-blue-500 h-4 rounded transition-all" style={{ width: `${s.prob}%` }}></div>
                           </div>
                         </td>
                       </tr>
@@ -438,7 +434,7 @@ Fin du rapport
               </div>
               <button
                 onClick={construireHuffman}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold"
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold transition"
               >
                 Construire Huffman →
               </button>
@@ -450,13 +446,16 @@ Fin du rapport
               <h2 className="text-2xl font-bold text-gray-800">Étape 3 : Arbre de Huffman</h2>
               <div className="bg-green-50 p-4 rounded-lg border border-green-200">
                 <p className="text-green-700 font-semibold">✅ Arbre construit - Codes optimaux générés</p>
+                <p className="text-sm text-green-600 mt-1">
+                  {Object.keys(codes).length} code{Object.keys(codes).length > 1 ? 's' : ''} généré{Object.keys(codes).length > 1 ? 's' : ''}
+                </p>
               </div>
               <div className="bg-gray-50 p-4 rounded-lg max-h-96 overflow-auto">
                 <h3 className="font-bold mb-2">Codes de Huffman</h3>
                 {Object.entries(codes).map(([c, code], i) => {
                   const d = c === '\n' ? '\\n' : c === ' ' ? '␣' : c;
                   return (
-                    <div key={i} className="flex justify-between p-2 border-b font-mono text-sm">
+                    <div key={i} className="flex justify-between p-2 border-b font-mono text-sm hover:bg-gray-100">
                       <span className="font-bold">'{d}'</span>
                       <span className="text-blue-600">{code}</span>
                     </div>
@@ -465,7 +464,7 @@ Fin du rapport
               </div>
               <button
                 onClick={encoder}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold"
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold transition"
               >
                 Encoder →
               </button>
@@ -480,11 +479,16 @@ Fin du rapport
                 <div className="text-xs font-mono bg-white p-3 rounded border break-all max-h-48 overflow-auto">
                   {compresse.substring(0, 1000)}{compresse.length > 1000 && '...'}
                 </div>
-                <p className="text-sm text-gray-600 mt-2">Longueur: {compresse.length} bits</p>
+                <p className="text-sm text-gray-600 mt-2">
+                  Longueur: <span className="font-bold">{compresse.length}</span> bits 
+                  <span className="ml-4">Réduction: <span className="font-bold text-green-600">
+                    {((1 - compresse.length / (texte.length * 8)) * 100).toFixed(1)}%
+                  </span></span>
+                </p>
               </div>
               <button
                 onClick={chiffrer}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold flex items-center gap-2"
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold flex items-center gap-2 transition"
               >
                 <Lock className="w-5 h-5" />
                 Chiffrer avec AES-256 →
@@ -512,7 +516,7 @@ Fin du rapport
                   </div>
                 </div>
                 <div className="bg-gray-50 p-4 rounded-lg">
-                  <h3 className="font-bold mb-2">Données chiffrées (JSON)</h3>
+                  <h3 className="font-bold mb-2">Données chiffrées (JSON avec IV et Ciphertext)</h3>
                   <div className="text-xs font-mono bg-white p-2 rounded border break-all max-h-32 overflow-auto">
                     {chiffre}
                   </div>
@@ -520,7 +524,7 @@ Fin du rapport
               </div>
               <button
                 onClick={dechiffrer}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold flex items-center gap-2"
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold flex items-center gap-2 transition"
               >
                 <Unlock className="w-5 h-5" />
                 Déchiffrer et Vérifier →
@@ -576,7 +580,12 @@ Fin du rapport
                   ) : (
                     <>
                       <AlertCircle className="w-6 h-6 text-red-600" />
-                      <span className="font-bold text-red-700">❌ Erreur de vérification</span>
+                      <div>
+                        <span className="font-bold text-red-700">❌ Erreur de vérification</span>
+                        <p className="text-sm text-red-600 mt-1">
+                          Le texte récupéré ne correspond pas à l'original. Cela peut être dû à un problème de chiffrement/déchiffrement.
+                        </p>
+                      </div>
                     </>
                   )}
                 </div>
@@ -586,14 +595,14 @@ Fin du rapport
                 <button
                   onClick={telecharger}
                   disabled={!metriques.ok}
-                  className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 font-bold flex items-center gap-2"
+                  className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-bold flex items-center gap-2 transition"
                 >
                   <Download className="w-5 h-5" />
                   Télécharger rapport
                 </button>
                 <button
                   onClick={reset}
-                  className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-semibold"
+                  className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-semibold transition"
                 >
                   Nouveau projet
                 </button>
