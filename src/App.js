@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FileText, Lock, Unlock, Download, CheckCircle, Shield } from 'lucide-react';
+import { FileText, Lock, Unlock, Download, CheckCircle, Shield, AlertCircle } from 'lucide-react';
 import CryptoJS from 'crypto-js';
 
 const CompressionApp = () => {
@@ -72,7 +72,10 @@ const CompressionApp = () => {
     const cleAleatoire = CryptoJS.lib.WordArray.random(32);
     const cleHex = cleAleatoire.toString(CryptoJS.enc.Hex);
     
-    // Conversion du texte binaire compressé en hexadécimal pour le chiffrement
+    // CORRECTION : Stocker la longueur originale du binaire
+    const longueurOriginale = compresse.length;
+    
+    // Conversion du texte binaire compressé en hexadécimal
     const compresseHex = binaryToHex(compresse);
     
     // Chiffrement AES-256 en mode CBC avec IV aléatoire
@@ -87,10 +90,11 @@ const CompressionApp = () => {
       }
     );
     
-    // Stockage de la clé, IV et texte chiffré
+    // Stockage de la clé, IV, texte chiffré ET longueur originale
     const donneesChiffrees = {
       iv: iv.toString(CryptoJS.enc.Hex),
-      chiffre: encrypted.ciphertext.toString(CryptoJS.enc.Hex)
+      chiffre: encrypted.ciphertext.toString(CryptoJS.enc.Hex),
+      longueur: longueurOriginale  // CORRECTION : Ajout de la longueur
     };
     
     setCle(cleHex);
@@ -120,7 +124,12 @@ const CompressionApp = () => {
       
       // Conversion du résultat en binaire
       const decryptedHex = decrypted.toString(CryptoJS.enc.Hex);
-      const dec = hexToBinary(decryptedHex);
+      let dec = hexToBinary(decryptedHex);
+      
+      // CORRECTION : Tronquer à la longueur originale
+      if (donneesChiffrees.longueur) {
+        dec = dec.substring(0, donneesChiffrees.longueur);
+      }
       
       // Décodage Huffman
       const inv = {};
@@ -144,11 +153,14 @@ const CompressionApp = () => {
     }
   };
 
-  // Fonctions de conversion binaire <-> hexadécimal
+  // Fonctions de conversion binaire <-> hexadécimal CORRIGÉES
   const binaryToHex = (binary) => {
     let hex = '';
-    for (let i = 0; i < binary.length; i += 4) {
-      const chunk = binary.substr(i, 4).padEnd(4, '0');
+    // Padding à un multiple de 4 pour la conversion
+    const paddedBinary = binary.padEnd(Math.ceil(binary.length / 4) * 4, '0');
+    
+    for (let i = 0; i < paddedBinary.length; i += 4) {
+      const chunk = paddedBinary.substring(i, i + 4);
       hex += parseInt(chunk, 2).toString(16);
     }
     return hex;
@@ -248,6 +260,7 @@ ${donneesChiffrees.chiffre.substring(0, 500)}${donneesChiffrees.chiffre.length >
 
 Mode: CBC (Cipher Block Chaining)
 Padding: PKCS7
+Longueur originale préservée: ${donneesChiffrees.longueur} bits
 
 ═══════════════════════════════════════════════════════════════
 6. VÉRIFICATION
@@ -280,6 +293,7 @@ SÉCURITÉ
 ✅ Mode: CBC avec IV aléatoire unique
 ✅ Clé: 256 bits générée aléatoirement
 ✅ Résistance: Sécurité militaire et gouvernementale
+✅ Préservation de la longueur: Protection contre la troncature
 
 ═══════════════════════════════════════════════════════════════
 Fin du rapport
@@ -291,6 +305,7 @@ Fin du rapport
     a.href = url;
     a.download = `Rapport_AES256_${new Date().toISOString().split('T')[0]}.txt`;
     a.click();
+    URL.revokeObjectURL(url);
   };
 
   const reset = () => {
@@ -350,11 +365,14 @@ Fin du rapport
             <div className="space-y-4">
               <h2 className="text-2xl font-bold text-gray-800">Étape 1 : Choix du texte</h2>
               <textarea
-                className="w-full h-56 p-4 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none font-mono"
+                className="w-full h-56 p-4 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none font-mono text-sm"
                 placeholder="Entrez votre texte..."
                 value={texte}
                 onChange={(e) => setTexte(e.target.value)}
               />
+              <div className="text-sm text-gray-600">
+                Caractères: {texte.length}
+              </div>
               <div className="flex gap-4">
                 <button
                   onClick={analyser}
@@ -438,9 +456,9 @@ Fin du rapport
                 {Object.entries(codes).map(([c, code], i) => {
                   const d = c === '\n' ? '\\n' : c === ' ' ? '␣' : c;
                   return (
-                    <div key={i} className="flex justify-between p-2 border-b">
-                      <span className="font-mono font-bold">'{d}'</span>
-                      <span className="font-mono text-blue-600">{code}</span>
+                    <div key={i} className="flex justify-between p-2 border-b font-mono text-sm">
+                      <span className="font-bold">'{d}'</span>
+                      <span className="text-blue-600">{code}</span>
                     </div>
                   );
                 })}
@@ -553,10 +571,13 @@ Fin du rapport
                   {metriques.ok ? (
                     <>
                       <CheckCircle className="w-6 h-6 text-green-600" />
-                      <span className="font-bold text-green-700">Vérification réussie ! Texte identique à l'original.</span>
+                      <span className="font-bold text-green-700">✅ Vérification réussie ! Texte identique à l'original.</span>
                     </>
                   ) : (
-                    <span className="font-bold text-red-700">Erreur de vérification</span>
+                    <>
+                      <AlertCircle className="w-6 h-6 text-red-600" />
+                      <span className="font-bold text-red-700">❌ Erreur de vérification</span>
+                    </>
                   )}
                 </div>
               </div>
@@ -564,7 +585,8 @@ Fin du rapport
               <div className="flex gap-4">
                 <button
                   onClick={telecharger}
-                  className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-bold flex items-center gap-2"
+                  disabled={!metriques.ok}
+                  className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 font-bold flex items-center gap-2"
                 >
                   <Download className="w-5 h-5" />
                   Télécharger rapport
